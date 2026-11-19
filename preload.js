@@ -82,4 +82,19 @@ contextBridge.exposeInMainWorld('baba', {
   cacheDropOne: (platform, id) => ipcRenderer.invoke('cache:drop-one', platform, id),
   // 解锁快捷键实际生效的键位（Ctrl+Alt+L 被占用时会降级到备用键）
   getLyricHotkey: () => ipcRenderer.invoke('lyric-window:hotkey'),
+
+  /* ---------- 自动检测更新 ---------- */
+  // 检查是否有新版本，返回 { ok, status, currentVersion, info:{version,notes}, progress, error }
+  checkUpdate: () => ipcRenderer.invoke('update:check'),
+  downloadUpdate: () => ipcRenderer.invoke('update:download'),
+  // 退出应用并安装已下载的新版本
+  installUpdate: () => ipcRenderer.invoke('update:install'),
+  getUpdateState: () => ipcRenderer.invoke('update:state'),
+  openReleasePage: () => ipcRenderer.invoke('update:open-release'),
+  // 主进程推送更新状态：checking / available / downloading / downloaded / error
+  onUpdateEvent: (cb) => {
+    const h = (e, payload) => cb(payload);
+    ipcRenderer.on('update:event', h);
+    return () => ipcRenderer.removeListener('update:event', h);
+  },
 });

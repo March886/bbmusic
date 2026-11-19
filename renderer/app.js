@@ -903,6 +903,138 @@ document.querySelectorAll('[data-logout]').forEach((btn) => {
 // 这里原先还有一份旧实现，函数声明同名会把新实现覆盖回去，已删除。
 refreshStatus();
 
+/* ---------------- 版本与更新 ---------------- */
+// 状态口径与主进程一致：idle / dev / checking / available / not-available / downloading / downloaded / error
+let updateStatus = 'idle';
+
+function renderUpdateState(s) {
+  if (!s) return;
+  const cur = s.currentVersion ? 'v' + s.currentVersion : '';
+  const latest = s.info && s.info.version ? 'v' + s.info.version : '';
+  const txt = $('updateStatusText');
+  const notes = $('updateNotesText');
+  const btnCheck = $('checkUpdateBtn');
+  const btnDown = $('downloadUpdateBtn');
+  const btnInst = $('installUpdateBtn');
+  const setShown = (el, on) => {
+    if (el) el.hidden = !on;
+  };
+
+  let main = '当前版本 ' + cur;
+  switch (s.status) {
+    case 'dev':
+      main = '当前版本 ' + cur + '（源码运行，自动更新只在安装版生效）';
+      break;
+    case 'checking':
+      main = '正在检查更新…（当前 ' + cur + '）';
+      break;
+    case 'available':
+      main = '发现新版本 ' + latest + '，当前 ' + cur;
+      break;
+    case 'not-available':
+      main = '已是最新版本 ' + cur;
+      break;
+    case 'downloading':
+      main = '正在下载 ' + latest + '（' + (s.progress || 0) + '%）';
+      break;
+    case 'downloaded':
+      main = '新版本 ' + latest + ' 已下载完成，重启即可安装';
+      break;
+    case 'error':
+      main = '更新检查失败：' + (s.error || '未知错误');
+      break;
+    default:
+      main = '当前版本 ' + cur;
+  }
+  if (txt) txt.textContent = main;
+
+  if (notes) {
+    const body = s.info && s.info.notes ? s.info.notes : '';
+    notes.textContent = s.status === 'available' || s.status === 'downloaded' ? body : '';
+    notes.hidden = !notes.textContent;
+  }
+
+  setShown(btnCheck, s.status !== 'downloading' && s.status !== 'downloaded');
+  setShown(btnDown, s.status === 'available');
+  setShown(btnInst, s.status === 'downloaded');
+  updateStatus = s.status;
+}
+
+async function refreshUpdateState() {
+  try {
+    renderUpdateState(await window.baba.getUpdateState());
+  } catch (e) {
+    /* 读不到状态就保持默认文案 */
+  }
+}
+
+if (window.baba && window.baba.onUpdateEvent) {
+  window.baba.onUpdateEvent((p) => {
+    if (!p) return;
+    const prev = updateStatus;
+    renderUpdateState(p);
+    if (p.status === 'available' && prev !== 'available') {
+      toast('发现新版本 v' + ((p.info && p.info.version) || ''));
+    } else if (p.status === 'downloaded' && prev !== 'downloaded') {
+      toast('更新已下载完成，点"重启安装"即可升级');
+    }
+  });
+}
+
+if ($('checkUpdateBtn')) {
+  $('checkUpdateBtn').addEventListener('click', async () => {
+    const btn = $('checkUpdateBtn');
+    btn.disabled = true;
+    btn.textContent = '检查中…';
+    try {
+      const r = await window.baba.checkUpdate();
+      renderUpdateState(r);
+      if (!r || !r.ok) {
+        toast((r && r.error) || '检查更新失败，请稍后重试');
+      } else if (r.status === 'available') {
+        toast('发现新版本 v' + ((r.info && r.info.version) || ''));
+      } else if (r.status === 'not-available') {
+        toast('已是最新版本 v' + r.currentVersion);
+      } else if (r.status === 'dev') {
+        toast('源码运行状态下不支持自动更新，安装版可用');
+      }
+    } catch (e) {
+      toast('检查更新失败：' + (e.message || e));
+    } finally {
+      btn.disabled = false;
+      btn.textContent = '检查更新';
+    }
+  });
+}
+
+if ($('downloadUpdateBtn')) {
+  $('downloadUpdateBtn').addEventListener('click', async () => {
+    toast('开始下载新版本…');
+    const r = await window.baba.downloadUpdate();
+    renderUpdateState(r);
+    if (!r || !r.ok) toast((r && r.error) || '下载失败，请稍后重试');
+  });
+}
+
+if ($('installUpdateBtn')) {
+  $('installUpdateBtn').addEventListener('click', async () => {
+    const btn = $('installUpdateBtn');
+    btn.disabled = true;
+    toast('正在重启并安装新版本…');
+    const r = await window.baba.installUpdate();
+    if (!r || !r.ok) {
+      btn.disabled = false;
+      toast((r && r.error) || '安装失败，请手动重新下载安装包');
+    }
+  });
+}
+
+if ($('releasePageBtn')) {
+  $('releasePageBtn').addEventListener('click', () => window.baba.openReleasePage());
+}
+
+refreshUpdateState();
+
 // 搜索先返回列表，热度/评论数是后端随后补的，补到一条更新一条
 if (window.baba && window.baba.onMeta) {
   window.baba.onMeta((p) => {

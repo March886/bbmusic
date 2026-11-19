@@ -1957,6 +1957,297 @@ function resetLyricPosition() {
   return { visible: true, x, y };
 }
 
+/* ---------------- 自动检测更新（electron-updater） ----------------
+   只在安装版生效：源码直跑没有 app-update.yml，检查必然失败，这里直接给友好提示。
+   流程：启动后静默查一次 → 发现有新版推给界面 → 用户点下载 → 下完提示重启安装。 */
+const UPDATE_RELEASE_URL = 'https://github.com/March886/bbmusic/releases/latest';
+const updateState = {
+  status: 'idle', // idle | dev | checking | available | not-available | downloading | downloaded | error
+  info: null,
+  progress: 0,
+  error: '',
+  manual: false,
+  lastCheckAt: 0,
+};
+let updater = null;
+let updaterReady = false;
+
+function updaterLog(msg) {
+  try {
+    fs.appendFileSync(
+      path.join(app.getPath('userData'), 'update.log'),
+      `[${new Date().toISOString()}] ${msg}\n`
+    );
+  } catch (e) {
+    /* 日志写不进去不影响主流程 */
+  }
+}
+
+// 把 electron-updater 的原始报错翻成人话，别把 ERR_CONNECTION_REFUSED 甩给用户
+function friendlyUpdateError(e) {
+  const raw = (e && (e.message || String(e))) || '';
+  const low = raw.toLowerCase();
+  if (
+    low.includes('err_connection') || low.includes('err_name') || low.includes('enotfound') ||
+    low.includes('etimedout') || low.includes('econnreset') || low.includes('econnrefused') ||
+    low.includes('network') || low.includes('wsarecv') || low.includes('socket') || low.includes('timeout')
+  ) {
+    return '连不上更新服务器（GitHub 访问受限），挂上代理后再试，或直接到发布页手动下载';
+  }
+  if (low.includes('no published versions') || low.includes('404') || low.includes('cannot find')) {
+    return '发布页还没上传更新文件，请到发布页手动下载安装';
+  }
+  if (low.includes('sha512') || low.includes('checksum') || low.includes('integrity')) {
+    return '安装包校验没通过，请到发布页重新下载';
+  }
+  if (low.includes('eacces') || low.includes('eperm') || low.includes('ebusy') || low.includes('ebusy')) {
+    return '更新文件写入失败（文件可能被占用），重启应用后再试';
+  }
+  return raw || '未知错误';
+}
+
+function pickReleaseNotes(info) {
+  const n = info && info.releaseNotes;
+  if (!n) return '';
+  let text = '';
+  if (typeof n === 'string') text = n;
+  else if (Array.isArray(n)) text = n.map((x) => (x && x.note) || '').join('\n');
+  return text.replace(/<[^>]+>/g, '').trim().slice(0, 600);
+}
+
+function packUpdateInfo(info) {
+  if (!info) return null;
+  return {
+    version: info.version || '',
+    releaseDate: info.releaseDate || '',
+    releaseName: info.releaseName || '',
+    notes: pickReleaseNotes(info),
+  };
+}
+
+function updateSnapshot(extra) {
+  return Object.assign(
+    {
+      status: updateState.status,
+      info: updateState.info,
+      progress: updateState.progress,
+      error: updateState.error,
+      currentVersion: app.getVersion(),
+      packaged: app.isPackaged,
+    },
+    extra || {}
+  );
+}
+
+// 状态一动就推给界面；窗口缩在托盘里没人看时，用托盘气泡顶一下
+function pushUpdateState(balloon) {
+  const payload = updateSnapshot();
+  try {
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('update:event', payload);
+  } catch (e) {
+    /* 窗口正在销毁，忽略 */
+  }
+  if (balloon && tray && tray.displayBalloon) {
+    try {
+      tray.displayBalloon(balloon);
+    } catch (e) {
+      /* 部分系统不支持气泡 */
+    }
+  }
+  return payload;
+}
+
+function initUpdater() {
+  if (updaterReady) return updater;
+  updaterReady = true;
+  if (!app.isPackaged) {
+    updateState.status = 'dev';
+    updaterLog('源码运行（未安装），跳过 electron-updater 初始化');
+    return null;
+  }
+  try {
+    const { autoUpdater } = require('electron-updater');
+    updater = autoUpdater;
+  } catch (e) {
+    updateState.status = 'error';
+    updateState.error = '更新组件加载失败：' + e.message;
+    updaterLog('require electron-updater 失败: ' + (e && e.stack));
+    return null;
+  }
+  updater.logger = {
+    info: (m) => updaterLog('[info] ' + m),
+    warn: (m) => updaterLog('[warn] ' + m),
+    error: (m) => updaterLog('[error] ' + m),
+    debug: (m) => updaterLog('[debug] ' + m),
+  };
+  // 先问再下：不替用户偷跑流量
+  updater.autoDownload = false;
+  // 退出时顺手把已下好的包装上
+  updater.autoInstallOnAppQuit = true;
+  updater.allowPrerelease = false;
+  updater.on('checking-for-update', () => {
+    updateState.status = 'checking';
+    updateState.error = '';
+    pushUpdateState();
+  });
+  updater.on('update-available', (info) => {
+    updateState.status = 'available';
+    updateState.info = packUpdateInfo(info);
+    updateState.progress = 0;
+    updateState.lastCheckAt = Date.now();
+    const ver = (updateState.info && updateState.info.version) || '新版本';
+    // 用户自己点的检查，界面里已有反馈，不用再弹气泡
+    pushUpdateState(
+      updateState.manual ? null : { title: 'BBMusic 有新版本', content: `发现 ${ver}，可在设置页下载安装` }
+    );
+  });
+  updater.on('update-not-available', () => {
+    updateState.status = 'not-available';
+    updateState.progress = 0;
+    updateState.lastCheckAt = Date.now();
+    pushUpdateState();
+  });
+  updater.on('download-progress', (p) => {
+    updateState.status = 'downloading';
+    updateState.progress = Math.max(0, Math.min(100, Math.round((p && p.percent) || 0)));
+    pushUpdateState();
+  });
+  updater.on('update-downloaded', (info) => {
+    updateState.status = 'downloaded';
+    updateState.info = packUpdateInfo(info) || updateState.info;
+    updateState.progress = 100;
+    pushUpdateState({ title: 'BBMusic 更新已就绪', content: '重启应用即可完成安装' });
+  });
+  updater.on('error', (e) => {
+    updateState.status = 'error';
+    updateState.error = friendlyUpdateError(e);
+    updaterLog('[error] 原始报错: ' + ((e && e.stack) || e));
+    pushUpdateState();
+  });
+  return updater;
+}
+
+// 检查更新：等一个确定结果再回给界面，按钮点下去不能没反应
+function checkUpdates(manual) {
+  const u = initUpdater();
+  updateState.manual = !!manual;
+  if (!u) {
+    return Promise.resolve(updateSnapshot({ ok: false }));
+  }
+  updateState.error = '';
+  return new Promise((resolve) => {
+    let settled = false;
+    let timer = null;
+    const finish = (res) => {
+      if (settled) return;
+      settled = true;
+      if (timer) clearTimeout(timer);
+      u.removeListener('update-available', onAvail);
+      u.removeListener('update-not-available', onNone);
+      u.removeListener('error', onErr);
+      resolve(res);
+    };
+    const onAvail = () => finish(updateSnapshot({ ok: true }));
+    const onNone = () => finish(updateSnapshot({ ok: true }));
+    const onErr = () => finish(updateSnapshot({ ok: false }));
+    u.once('update-available', onAvail);
+    u.once('update-not-available', onNone);
+    u.once('error', onErr);
+    timer = setTimeout(() => {
+      updateState.status = 'error';
+      updateState.error = '检查更新超时，请检查网络或代理后重试';
+      finish(updateSnapshot({ ok: false }));
+      pushUpdateState();
+    }, 20000);
+    Promise.resolve()
+      .then(() => u.checkForUpdates())
+      .catch((e) => {
+        updateState.status = 'error';
+        updateState.error = friendlyUpdateError(e);
+        updaterLog('[error] checkForUpdates: ' + ((e && e.stack) || e));
+        finish(updateSnapshot({ ok: false }));
+      });
+  });
+}
+
+async function downloadUpdate() {
+  const u = initUpdater();
+  if (!u) return updateSnapshot({ ok: false });
+  if (updateState.status === 'downloaded') return updateSnapshot({ ok: true });
+  if (updateState.status === 'downloading') return updateSnapshot({ ok: true });
+  try {
+    updateState.status = 'downloading';
+    updateState.progress = 0;
+    updateState.error = '';
+    pushUpdateState();
+    await u.downloadUpdate();
+    return updateSnapshot({ ok: true });
+  } catch (e) {
+    updateState.status = 'error';
+    updateState.error = friendlyUpdateError(e);
+    updaterLog('[error] downloadUpdate: ' + ((e && e.stack) || e));
+    return pushUpdateState({ ok: false });
+  }
+}
+
+function installUpdate() {
+  if (!updater || updateState.status !== 'downloaded') {
+    return updateSnapshot({ ok: false, error: updateState.error || '更新包还没下载完成' });
+  }
+  // 先把退出拦截摘掉，否则"最小化到托盘"会把这次退出吃掉
+  app.isQuitting = true;
+  setTimeout(() => {
+    try {
+      updater.quitAndInstall(false, true);
+    } catch (e) {
+      updateState.status = 'error';
+      updateState.error = '安装没能启动，请到发布页手动下载安装包';
+      updaterLog('[error] quitAndInstall: ' + ((e && e.stack) || e));
+      pushUpdateState();
+    }
+  }, 150);
+  return updateSnapshot({ ok: true });
+}
+
+// 托盘里的更新入口：已经下好就直接装，发现新版就开下，其余按手动检查处理
+async function trayUpdateAction() {
+  try {
+    if (!mainWindow) createWindow();
+    if (mainWindow) {
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.show();
+      mainWindow.focus();
+    }
+  } catch (e) {
+    /* 窗口状态异常也不该卡住检查 */
+  }
+  if (updateState.status === 'downloaded') {
+    installUpdate();
+    return;
+  }
+  if (updateState.status === 'available') {
+    if (tray && tray.displayBalloon) {
+      try {
+        tray.displayBalloon({ title: 'BBMusic', content: '开始下载新版本…' });
+      } catch (e) {
+        /* 忽略 */
+      }
+    }
+    downloadUpdate();
+    return;
+  }
+  await checkUpdates(true);
+}
+
+ipcMain.handle('update:check', () => checkUpdates(true));
+ipcMain.handle('update:download', () => downloadUpdate());
+ipcMain.handle('update:install', () => installUpdate());
+ipcMain.handle('update:state', () => updateSnapshot({ ok: true }));
+ipcMain.handle('update:open-release', () => {
+  shell.openExternal(UPDATE_RELEASE_URL);
+  return { ok: true };
+});
+
 /* ---------------- 托盘 ---------------- */
 function trayIconPath() {
   const ico = path.join(__dirname, 'icon.ico');
@@ -2006,6 +2297,17 @@ function buildTrayMenu() {
       label: '桌面歌词归位（底部居中）',
       enabled: on,
       click: () => resetLyricPosition(),
+    },
+    { type: 'separator' },
+    {
+      label: (function () {
+        if (updateState.status === 'downloaded') return '重启安装新版本';
+        if (updateState.status === 'available')
+          return '下载新版本 ' + ((updateState.info && updateState.info.version) || '');
+        if (updateState.status === 'downloading') return '正在下载更新 ' + updateState.progress + '%';
+        return '检查更新';
+      })(),
+      click: () => trayUpdateAction(),
     },
     { type: 'separator' },
     {
@@ -2329,6 +2631,10 @@ app.whenReady().then(() => {
   // 桌面歌词锁成鼠标穿透后，靠这个组合键在托盘之外也能解回来
   // 候选键位逐个尝试：Ctrl+Alt+L 被别的软件抢走时自动降级到备用键
   registerLyricHotkey();
+  // 装好之后静默查一次更新；断网、超时都只是后台记日志，不打扰用户
+  setTimeout(() => {
+    checkUpdates(false);
+  }, 8000);
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });

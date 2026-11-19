@@ -698,3 +698,6 @@ body.lc-rainbow .lyric-line:hover { -webkit-text-fill-color: currentColor; }
 /* 清除缓存：平时中性，悬停才显红，危险语义靠交互反馈而非常驻红框 */
 #cacheClearBtn.danger { color: var(--text); border-color: var(--line); }
 #cacheClearBtn.danger:hover { color: #fff; background: #e05353; border-color: #e05353; }
+
+/* 更新按钮用原生 hidden 属性控制显隐；.btn-primary / .btn-ghost 自带 display，需要补一条 */
+[hidden] { display: none !important; }
