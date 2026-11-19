@@ -59,7 +59,6 @@
           <label>排序</label>
           <select id="sortSelect">
             <option value="comments">按评论总数</option>
-            <option value="hot">按热度</option>
             <option value="match">按相关度</option>
             <option value="smart">综合推荐</option>
           </select>
@@ -77,7 +76,6 @@
           <span class="col-title">标题</span>
           <span class="col-album">专辑</span>
           <span class="col-plat">来源</span>
-          <span class="col-hot">热度</span>
           <span class="col-cmt">评论</span>
           <span class="col-time">时长</span>
           <span class="col-act" title="右键歌曲也可以添加到歌单">+</span>
@@ -121,8 +119,7 @@
             <span class="col-title">标题</span>
             <span class="col-album">专辑</span>
             <span class="col-plat">来源</span>
-            <span class="col-hot">热度</span>
-            <span class="col-cmt">评论</span>
+              <span class="col-cmt">评论</span>
             <span class="col-time">时长</span>
             <span class="col-act">+</span>
           </div>
@@ -149,7 +146,6 @@
           <span class="col-title">标题</span>
           <span class="col-album">专辑</span>
           <span class="col-plat">来源</span>
-          <span class="col-hot">热度</span>
           <span class="col-cmt">评论</span>
           <span class="col-time">时长</span>
           <span class="col-act">+</span>
@@ -365,7 +361,7 @@
         <p class="disclaimer">
           本软件仅为个人本机学习使用，所有音频均来自各平台官方接口，版权归原平台与版权方所有。
           请勿用于商业用途或公开分发，请勿将本软件安装包上传至任何公开渠道。
-          <br />热度说明：网易云取平台官方热度值；QQ 音乐与酷我接口不返回播放量，热度按站内排名与评分估算，仅供参考。
+          <br />排序说明：网易云与 QQ 音乐的评论数为平台官方值，酷我不返回评论数；取不到数据的条目标注为「—」，不代表零评论。
         </p>
       </section>
     </main>
@@ -398,7 +394,7 @@
           <svg class="ico-svg" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20.7l-1.4-1.3C5.7 15 3 12.6 3 9.6 3 7.1 5.1 5 7.6 5c1.5 0 2.9.7 3.8 1.9.9-1.2 2.3-1.9 3.8-1.9C17.6 5 19.7 7.1 19.7 9.6c0 3-2.7 5.4-7.3 9.8L12 20.7z"/></svg>
         </button>
         <button id="dlBtn" class="ctrl dl" aria-label="桌面歌词" title="开启 / 关闭桌面歌词（双击歌词可锁定穿透，托盘菜单或快捷键解锁）">
-          <svg class="ico-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2.6" y="3.6" width="18.8" height="12.4" rx="2.4"/><path d="M12 16v3.4"/><path d="M7.6 19.9h8.8"/><path d="M6.4 7.6h11.2"/><path d="M6.4 11h6.4"/></svg>
+          <svg class="ico-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9.8 16.8V5.9l4.4 1.5"/><circle cx="7.7" cy="16.9" r="2.1" fill="currentColor" stroke="none"/><path d="M15.6 8.6a6.1 6.1 0 0 1 0 7.6"/><path d="M18.5 6.2a9.6 9.6 0 0 1 0 12.4"/></svg>
         </button>
       </div>
       <div class="progress-row">
@@ -449,6 +445,7 @@
 
   <div id="toast" class="toast hidden"></div>
   <audio id="audio"></audio>
-  <script src="app.js"></script>
+  <script src="rank.js"></script>
+<script src="app.js"></script>
 </body>
 </html>

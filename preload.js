@@ -13,11 +13,13 @@ contextBridge.exposeInMainWorld('baba', {
   openExternal: (url) => ipcRenderer.invoke('open-external', url),
   fetchToplist: (platform) => ipcRenderer.invoke('toplist', platform),
   appInfo: () => ipcRenderer.invoke('app-info'),
+  // 当前播放曲目上报：主进程据此更新窗口标题（任务栏悬停显示「歌名 - 歌手」）与托盘提示
+  nowPlaying: (info) => ipcRenderer.send('player:now', info),
   // 歌单分享链接导入：传 QQ 音乐 / 网易云的歌单分享文本，返回解析后的歌单
   importPlaylist: (link) => ipcRenderer.invoke('playlist:import', link),
   // 该曲在导入平台因 VIP / 版权下架不可播时，去其他平台反查同一首歌的可播音源
   findSources: (song) => ipcRenderer.invoke('song:find-sources', song),
-  // 搜索返回后热度/评论数是异步补的，补到一条推一条
+  // 搜索返回后评论数是异步补的，补到一条推一条
   onMeta: (cb) => {
     const h = (e, payload) => cb(payload);
     ipcRenderer.on('meta:update', h);

@@ -1,21 +1,10 @@
----
-AIGC:
-    Label: "1"
-    ContentProducer: 001191440300708461136T1XGW3
-    ProduceID: 572427f28736b473c3099410afb81bcb_2620ef55e3c911f1ab13525400248c00
-    ReservedCode1: uLRRqctSiGw8Rj7Rj2+UA6lM+bgsL7gHkpnrzhdcLoPqq4qGA3R23rZoJuSocdkpj2WayJwKZORoifP3ym+oH3Cgcx4IVeeg3/2fayDLTPnYirqV2JeKY8Kx6TblOnlGS2TgNo83xTCS05XHeA+oUQzNMMpYE+Vz+EVAqmNqMeSy1y8Y49m0Mmx1YcY=
-    ContentPropagator: 001191440300708461136T1XGW3
-    PropagateID: 572427f28736b473c3099410afb81bcb_2620ef55e3c911f1ab13525400248c00
-    ReservedCode2: uLRRqctSiGw8Rj7Rj2+UA6lM+bgsL7gHkpnrzhdcLoPqq4qGA3R23rZoJuSocdkpj2WayJwKZORoifP3ym+oH3Cgcx4IVeeg3/2fayDLTPnYirqV2JeKY8Kx6TblOnlGS2TgNo83xTCS05XHeA+oUQzNMMpYE+Vz+EVAqmNqMeSy1y8Y49m0Mmx1YcY=
----
-
 # BBMusic
 
 多平台聚合音乐播放器 · Electron + 原生 JS（无前端框架）
 
 一次搜索聚合 **网易云音乐 / QQ 音乐 / 酷我音乐** 三个平台的曲库，任一平台拿不到音源（会员专享、版权下架）时，自动去 **B 站** 检索同一首歌作为兜底播放源。
 
-作者：**粑粑超人** ｜ 当前版本：**0.4.0** ｜ 平台：Windows x64
+作者：**粑粑超人** ｜ 当前版本：**1.0.0** ｜ 平台：Windows x64
 
 ![界面预览](界面预览.png)
 
@@ -49,9 +38,23 @@ babaMusic/
 └─ renderer/
    ├─ index.html            侧栏五视图：搜索 / 歌单 / 播放历史 / 正在播放 / 设置
    ├─ app.js                渲染层主逻辑
+   ├─ rank.js               排序内核（主进程与渲染层共用同一套打分公式）
    ├─ lyric.html/js/css     独立桌面歌词窗
    └─ style.css             主窗样式
 ```
+
+## 下载与安装
+
+到 [Releases](https://github.com/March886/bbmusic/releases) 下载最新安装包：
+
+| 文件 | 用途 |
+| --- | --- |
+| `BBMusic-1.0.0-win-x64-setup.exe` | Windows x64 安装包，双击按向导安装 |
+| `latest.yml`、`*.blockmap` | 客户端自动更新的索引与差量文件，**不用手动下载** |
+
+- 安装位置：`%LOCALAPPDATA%\Programs\BBMusic`（用户级，无需管理员）
+- 用户数据：`%APPDATA%\bbmusic\bbmusic.json`，卸载不删除，覆盖安装保留歌单与设置
+- 已装老版本无需卸载，直接跑新安装包即可覆盖升级；装好后启动时会自动检查更新
 
 ## 本地运行
 
@@ -76,8 +79,8 @@ npm run dist
 ## 已知限制
 
 - 三个平台的接口均为非官方公开接口，随时可能变更或失效，失效后需自行适配
-- 未做代码签名，首次运行会出现 SmartScreen 提示
-- 聚合播放第三方地址仅适合个人本地使用，不适合公开分发安装包
+- 未做代码签名，首次运行会出现 SmartScreen 提示。介意的话可在「更多信息 → 仍要运行」放行，或自行用证书重签
+- 音源来自第三方平台公开接口，能否播放取决于各平台的版权与会员策略；播放器只做取链与播放，不存储、不分发任何音频文件
 
 ## 免责声明
 
@@ -88,4 +91,3 @@ npm run dist
 ## License
 
 [MIT](LICENSE)
-*（内容由AI生成，仅供参考）*

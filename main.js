@@ -48,6 +48,27 @@ const LYRIC_HOTKEY_CANDIDATES = [
 let lyricHotkeyLabel = '';
 app.isQuitting = false;
 
+/* ---------------- 基础身份 ---------------- */
+// 任务栏分组、系统通知来源都认这个 ID，必须与 build.appId 一致
+try {
+  app.setAppUserModelId('com.babachaoren.bbmusic');
+} catch (e) {
+  /* 极老系统上不可用，忽略 */
+}
+
+// 单实例：重复双击只是把已有窗口唤回前台，不再起第二个进程抢配置文件和音频缓存
+const gotTheLock = app.requestSingleInstanceLock();
+if (!gotTheLock) {
+  app.quit();
+} else {
+  app.on('second-instance', () => {
+    if (!mainWindow) return createWindow();
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    if (!mainWindow.isVisible()) mainWindow.show();
+    mainWindow.focus();
+  });
+}
+
 /* ---------------- 配置持久化 ---------------- */
 // 软件已由 babaMusic 更名为 BBMusic，userData 目录随之变化，首次启动时把旧配置（含登录 Cookie）搬过来
 const cfgPath = () => path.join(app.getPath('userData'), 'bbmusic.json');
@@ -251,7 +272,9 @@ function loadCfg() {
   // 幂等纠偏（不依赖 cfgRev，避免老用户的 cfgRev 已被写成新值导致升级被跳过）：
   // smart 模式已废弃，一律归到"按评论总数"；没设置关闭行为的一律默认最小化到托盘
   let needSave = false;
-  if (!cfg.sortMode || cfg.sortMode === 'smart') {
+  // 热度排序已下线：老配置里的 hot 一律归到「按评论总数」；
+  // smart（综合推荐）此前一直被强行改成 comments，导致界面上那个选项点了没反应，现在让它真正生效
+  if (!cfg.sortMode || SORT_MODES.indexOf(cfg.sortMode) === -1) {
     cfg.sortMode = 'comments';
     needSave = true;
   }
@@ -444,7 +467,8 @@ function normHistory(list) {
 /* ---------------- 歌单与外部分享链接导入 ---------------- */
 const SHARE_UA =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
-const QQ_COVER = (mid) => (mid ? 'https://y.qq.com/music/photo_new/T002R300x300M000' + mid + '.jpg' : '');
+// 封面统一走各平台的图片 CDN 域名（y.gtimg.cn 是腾讯的图片 CDN，比网页域名 y.qq.com 更稳）
+const QQ_COVER = (mid) => (mid ? 'https://y.gtimg.cn/music/photo_new/T002R300x300M000' + mid + '.jpg' : '');
 const NE_COVER = (url) => (url ? String(url).replace(/^http:/, 'https:') + '?param=300y300' : '');
 
 // 从一段文字里抠出分享链接，并尽量跟随短链拿到真实地址
@@ -656,162 +680,50 @@ async function importPlaylistFromLink(link) {
   return { ok: false, reason: (lastErr && lastErr.message) || '导入失败' };
 }
 
-/* ---------------- 文本规整与匹配度 ---------------- */
-function norm(s) {
-  return String(s || '')
-    .toLowerCase()
-    .replace(/[（(\[【].*?[)）\]】]/g, '')
-    .replace(/[\s\-_·、,，.。!！?？'"“”‘’~]/g, '')
-    .replace(/(live|remix|伴奏|翻唱|版|dj|feat.*)/g, '');
-}
+/* ---------------- 文本规整与匹配度 ----------------
+   曾经 norm/versionTag/matchScore/sortResultList 在这份文件里，前端 rerenderSorted 又抄了另一套，
+   两套公式各自排序，切排序时前端直接把后端顺序推翻（周杰伦这类只有 QQ/酷我源的正版被翻唱挤下去）。
+   现在全部收敛到 renderer/rank.js：主进程 require、渲染层 script 引入，一份公式两边共用。 */
+const RANK = require('./renderer/rank.js');
+const norm = RANK.norm;
+const strictNorm = RANK.strictNorm;
+const versionTag = RANK.versionTag;
+const artistVersionTag = RANK.artistVersionTag;
+const fullVersionTag = RANK.fullVersionTag;
+const parseQueryTokens = RANK.parseQueryTokens;
+const splitTitleQuery = RANK.splitTitleQuery;
+const matchScore = RANK.matchScore;
+const commentWeight = RANK.commentWeight;
+const sortResultList = RANK.sortResultList;
+const rankList = RANK.rankList;
 
-// 版本标记识别：伴奏 / 翻唱 / remix / 现场等属于不同"作品"，绝不能与原版合并
-const VERSION_RULES = [
-  { tag: '伴奏', re: /伴奏|卡拉|karaoke|instrumental|off\s*vocal|无和声/i },
-  { tag: '纯音乐', re: /纯音乐|inst\.?\s|instrumental/i },
-  { tag: '翻唱', re: /翻唱|cover|致敬|原唱\s*[:：]/i },
-  { tag: 'remix', re: /remix|混音|dj\s*版|电音|club\s*mix|bootleg/i },
-  { tag: '现场', re: /live|现场|演唱会|concert/i },
-  // 倍速版（0.8x / 1.2x）本质也是片段改编，必须单独识别：
-  // 漏掉时《说好的幸福呢 (0.8x)》会因为评论数极高被当成原版顶到第一
-  { tag: '片段', re: /抖音|热播|片段|剪辑|加速|降速|慢速|sped\s*up|slowed|完整版|高清版|\d+(?:\.\d+)?\s*[xX](?![a-zA-Z])/i },
-  { tag: '乐器版', re: /钢琴|piano|吉他|guitar|八音盒|music\s*box|古筝|二胡|小提琴|violin|口琴|尤克里里|ukulele/i },
-  { tag: '换声', re: /女声|男声|童声|女版|男版|ai\s*翻唱/i },
-  { tag: '改编', re: /治愈|改编|重制|重新编曲|新版|不插电|unplugged|acoustic|古风|摇滚|爵士|轻音乐|八音盒|助眠|白噪音|欢快|律动|动感|抒情|伤感|唯美|温柔|清新|燃|萌|搞笑/i },
-  { tag: 'beat', re: /\bbeat\b|type\s*beat|beats/i },
-];
+// 排序模式白名单：热度（hot）已取消——QQ/酷我根本不返回播放量，
+// 用"结果内排名"伪造的热度既不可解释，又把各平台第一名一律折成 1.0，权重等于白发
+const SORT_MODES = ['comments', 'match', 'smart'];
 
-function versionTag(name) {
-  const s = String(name || '');
-  const tags = [];
-  for (const r of VERSION_RULES) if (r.re.test(s)) tags.push(r.tag);
-  // 兜底：名字里带"版"却没人认领的（如"欢快律动版"），一样视为改编版本
-  if (!tags.length && /版/.test(s)) tags.push('改编');
-  return Array.from(new Set(tags)).sort().join('+');
-}
-
-// 合并键专用规整：只去掉符号本身，保留括号内的文字。
-// norm() 会把"稻香(治愈版)"整段括号删成"稻香"，导致各种改编版本被误判成同一首，
-// 于是"封面信息是原版、播出来是伴奏/翻唱"——合并键必须用这个更严格的版本。
-function strictNorm(s) {
-  return String(s || '')
-    .toLowerCase()
-    .replace(/[\s\-_·、,，.。!！?？'"“”‘’~/\\|+&()[\]【】<>《》：:;；]/g, '');
-}
-
-// 查询分词：只按空格 / 顿号 / 逗号 / 斜杠切，绝不按"的"切。
-// 按"的"切会把《说好的幸福呢》切成"说好"+"幸福呢"，歌名精确匹配反而被破坏。
-function parseQueryTokens(keyword) {
-  return String(keyword || '')
-    .split(/[\s,，、/|+]+/)
-    .map((t) => t.trim())
-    .filter((t) => t.length >= 1);
-}
-
-// 从查询串里剥掉歌手名，剩下的才是真正的歌名查询串。
-// 只在"结果里的歌手名确实出现在查询中"时才剥，纯歌名搜索原样返回，不会误伤。
-function splitTitleQuery(keyword, artists) {
-  const k = String(keyword || '');
-  let title = k;
-  let hit = false;
-  const names = String(artists || '')
-    .split(/[\/、,，&]/)
-    .map((a) => a.trim())
-    .filter((a) => a.length >= 2);
-  for (const n of names) {
-    if (title.includes(n)) title = title.split(n).join(' ').trim();
-    if (k.includes(n)) hit = true;
-  }
-  return { title: title.trim() || k, hit };
-}
-
-function matchScore(title, kw) {
-  const t = norm(title);
-  const k = norm(kw);
-  if (!k) return 0.5;
-  if (!t) return 0;
-  if (t === k) return 1;
-  // 以关键词开头/结尾：按多出来的字数衰减，"晴天"vs"晴天，雨"不至于和原版同分
-  if (t.startsWith(k) || t.endsWith(k)) {
-    const extra = t.length - k.length;
-    return Math.max(0.6, 0.94 - extra * 0.06);
-  }
-  // 关键词只占标题一部分：按覆盖率衰减，"夏日友晴天"之于"晴天"只能算半个相关
-  if (t.includes(k)) return 0.45 + 0.35 * (k.length / t.length);
-  if (k.includes(t) && t.length >= 2) return 0.55 + 0.2 * (t.length / k.length);
-  let hit = 0;
-  for (const ch of k) if (t.includes(ch)) hit++;
-  return (hit / k.length) * 0.5;
-}
-
-// 统一热度到 0-1：网易云用官方 pop 值；QQ 接口不返回播放量，只能用结果内排名换算（估算值）
-function hotScore(item, total) {
-  if (item.platform === 'netease') return Math.min(1, (item.popularity || 0) / 100);
-  const rank = item.platformRank || 0;
-  const ratio = total > 1 ? 1 - rank / total : 1;
-  return Math.max(0.08, Math.min(1, ratio));
-}
-
-/* ---------------- 排序 ---------------- */
-// 评论数换算到 0~1：4.6 万条 ≈ 0.92，1000 条 ≈ 0.6，1 条 ≈ 0.06。
-// 用对数压缩，避免少数大爆款把其它候选全挤到后面
-function commentWeight(c) {
-  return Math.log10(1 + (c || 0)) / 5;
-}
-
-// 统一排序入口：搜索出结果时排一次，评论数补全后再排一次
-function sortResultList(list, keyword, mode) {
-  const kwLen = String(keyword || '').length;
-  const m = mode || 'comments';
-  const kwHasVer = versionTag(keyword) !== '';
-  list.forEach((r) => {
-    const ver = r.version || '';
-    const cover = r.cover === undefined ? 1 : r.cover;
-    if (m === 'comments') {
-      // 权重重新分配。原来评论数占 62%，但 QQ/酷我独有条目（网易云没版权的正版，
-      // 典型如周杰伦）评论数恒为 0，等于被判死刑——搜「我不配」时原版被翻唱挤到第 14 名。
-      // 现在评论只做辅助，主权重交回「歌名匹配 + 查询分词覆盖 + 平台热度」。
-      let sc =
-        (r.match || 0) * 0.34 +
-        cover * 0.26 +
-        (r.hot || 0) * 0.18 +
-        // 评论缺失补偿：没评论不代表不火，歌手对得上的给 0.1 基线，不再按 0 硬算
-        Math.max(commentWeight(r.comments), r.artHit ? 0.1 : 0) * 0.12 +
-        // 多平台同时能播，多半就是各曲库里都存在的那一版
-        Math.min(0.1, Math.max(0, (r.platCount || 1) - 1) * 0.05);
-      // 相关度是门槛：评论再多，不是这首歌也不能压过正主（"夏日友晴天"之于"晴天"）
-      if ((r.match || 0) < 0.7) sc *= 0.6;
-      else if ((r.match || 0) < 0.95) sc *= 0.85; // 标题只是包含关键词的
-      if (ver && !kwHasVer) sc *= 0.62; // live/伴奏等改编版本降权，但不隐藏
-      // 逐字同名且没有任何版本标记的给保底加分，避免正版被同名片压到首屏之外
-      if ((r.match || 0) >= 0.99 && !ver) sc += 0.06;
-      if (r.artHit) sc += 0.02;
-      r.score = Math.min(1, sc);
-    } else if (m === 'hot') {
-      r.score = (r.hot || 0) * (ver && !kwHasVer ? 0.72 : 1);
-    } else if (m === 'match') {
-      r.score = ((r.match || 0) * 0.62 + cover * 0.38) * (ver && !kwHasVer ? 0.85 : 1);
-    } else {
-      let sc = (r.match || 0) * 0.42 + cover * 0.24 + (r.hot || 0) * 0.24;
-      if (ver && !kwHasVer) sc *= 0.72;
-      if (r.artHit) sc = Math.min(1, sc + 0.12);
-      if (r.shortDur) sc *= 0.78;
-      r.score = sc;
-    }
+// 一致性投票：同歌名同歌手同版本之外，专辑名和时长都对得上，才算跨平台互相印证。
+// 原来的 platCount 只要平台不同就 +1，同名不同专辑的搬运版也能互相"印证"
+function consistencyCount(rec, bucket) {
+  const al = strictNorm(rec.album || '');
+  const sameAlbum = (x) => {
+    const b = strictNorm(x.album || '');
+    if (!al || !b) return false;
+    if (b === al) return true;
+    if (al.length >= 3 && b.length >= 3 && (b.indexOf(al) >= 0 || al.indexOf(b) >= 0)) return true;
+    return false;
+  };
+  const dur = rec.duration || 0;
+  const group = bucket.filter(sameAlbum);
+  if (!group.length) group.push(rec);
+  const plats = new Set();
+  group.forEach((x) => {
+    const d = x.duration || 0;
+    // 时长差超过同版本容差的，不认作同一录音
+    if (dur && d && Math.abs(d - dur) > Math.max(8000, dur * 0.08)) return;
+    (x.sources || []).forEach((s) => plats.add(s.platform));
   });
-  list.sort((a, b) => {
-    if (Math.abs((b.score || 0) - (a.score || 0)) > 0.001) return b.score - a.score;
-    // 评论模式下分数打平时，谁评论多谁在前
-    if (m === 'comments' && (b.comments || 0) !== (a.comments || 0)) return (b.comments || 0) - (a.comments || 0);
-    if (!!a.artHit !== !!b.artHit) return a.artHit ? -1 : 1;
-    if (!!a.version !== !!b.version) return a.version ? 1 : -1;
-    const la = Math.abs(a.name.length - kwLen);
-    const lb = Math.abs(b.name.length - kwLen);
-    if (la !== lb) return la - lb;
-    if ((b.platCount || 1) !== (a.platCount || 1)) return (b.platCount || 1) - (a.platCount || 1);
-    return (b.duration || 0) - (a.duration || 0);
-  });
-  return list;
+  if (!plats.size) (rec.sources || []).forEach((s) => plats.add(s.platform));
+  return plats.size;
 }
 
 /* ---------------- 聚合搜索 + 去重合并 ---------------- */
@@ -859,10 +771,13 @@ async function aggregateSearch(keyword, opts = {}) {
   for (const item of raw) {
     // 过滤残缺条目：短于 30 秒的多是试听片段、铃声，不是完整歌曲
     if (item.duration && item.duration < 45000) continue;
-    const vtag = versionTag(item.name);
+    // 版本标记：歌名 + 歌手名一起看。歌手叫「XX翻唱」「伴奏君」的条目，
+    // 歌名往往干净得像原版，只喂 name 会漏判、不打折也不拆条
+    const artistVtag = artistVersionTag(item.artists);
+    const vtag = [versionTag(item.name), artistVtag].filter(Boolean).join('+');
     // 展示与降权用"歌名+专辑名"判断版本：很多平台的 live/伴奏标记写在专辑名里，
     // 只认歌名会把《稻香》和《稻香 (Live)》当成同一首合并，播放时就串了
-    const vtagFull = versionTag(item.name + ' ' + (item.album || ''));
+    const vtagFull = fullVersionTag(item.name, item.album, item.artists);
     // 合并键必须带上"歌名+专辑"识别出的版本标签。
     // QQ 大量 live/伴奏版本把标记写在专辑名里、歌名仍是《孤勇者》，
     // 只用歌名做键就会把它们并进原版，列表里看着是原版、点开响的是伴奏
@@ -901,8 +816,6 @@ async function aggregateSearch(keyword, opts = {}) {
         sources: [],
         // 各源上报的时长，合并结束后投票定出"列表标注时长"
         durs: [],
-        hot: 0,
-        hotDetail: {},
       };
       bucket.push(rec);
     }
@@ -927,10 +840,6 @@ async function aggregateSearch(keyword, opts = {}) {
       name: item.name || '',
       fee: item.fee,
     });
-    const hs = hotScore(item, totals[item.platform] || 1);
-    const hv = item.platform === 'netease' ? item.popularity || 0 : Math.round(hs * 100);
-    rec.hotDetail[item.platform] = Math.max(rec.hotDetail[item.platform] || 0, hv);
-    if (hs > rec.hot) rec.hot = hs;
     if (!rec.cover && item.cover) rec.cover = item.cover;
   }
 
@@ -939,6 +848,11 @@ async function aggregateSearch(keyword, opts = {}) {
   // 取最长会让列表和播放条一路显示错时长（曾显示 5:17，实际 4:48），播放校验基准也跟着错。
   for (const bucket of map.values()) {
     for (const rec of bucket) rec.duration = pickDuration(rec.durs) || rec.duration || 0;
+  }
+
+  // 跨平台一致性票数：取代原来粗糙的 platCount 作为质量层信号
+  for (const bucket of map.values()) {
+    for (const rec of bucket) rec.consist = consistencyCount(rec, bucket);
   }
 
   // 本次结果的时长中位数, 用来识别"片段版"
@@ -963,7 +877,9 @@ async function aggregateSearch(keyword, opts = {}) {
     // token 覆盖率：查询的每一段在「歌名 + 歌手」里命中几成。
     // 搜「周杰伦 我不配」时，翻唱条目歌名对得上、歌手对不上，只能拿一半分。
     // 只有一段词（纯歌名搜索）时没有区分度，按中性 1 处理，避免全体一起被拉低。
-    r.cover =
+    // 注意：这个字段是打分用的覆盖率，绝不能写进 r.cover（封面地址），
+    // 否则封面会被覆写成 0.xx / 1 这类数字，列表里整片封面显示不出来。
+    r.tokCover =
       kwTokens.length >= 2
         ? kwTokens.filter((t) => (norm(r.name) + ' ' + norm(r.artists)).includes(norm(t))).length / kwTokens.length
         : 1;
@@ -990,10 +906,11 @@ async function aggregateSearch(keyword, opts = {}) {
   return { list: out, errors, counts: totals };
 }
 
-/* ---------------- 热度画像补全 ----------------
-   搜索结果里能直接拿到的热度只有网易云的 pop 值和平台排名；
+/* ---------------- 搜索元数据补全（评论数等） ----------------
+   搜索结果里能直接拿到的只有各源自身返回的字段（网易云 pop、平台内部排名）；
    评论数、酷我 score100 都要额外查一次。为了不拖慢搜索，
-   列表先返回，补到的数据再按条目增量推给界面。 */
+   列表先返回，补到的数据再按条目增量推给界面。
+   热度排序已下线，这里的 pop 只用于内部旁证，不再作为排序维度。 */
 async function pool(tasks, size) {
   let i = 0;
   const workers = Array.from({ length: Math.min(size, tasks.length) }, async () => {
@@ -1007,19 +924,23 @@ async function pool(tasks, size) {
 
 // 网易云评论数缓存：按歌曲 id 去重，切排序或重复搜索不会二次请求
 const neCommentCache = new Map();
-async function neCommentCount(id) {
+// 返回 { c, ok }：ok=false 表示这次没问出结果（接口失败/超时），
+// 界面显示「—」；ok=true 且 c=0 才是"这首歌确实没评论"。
+// 以前统一 return 0，两种情况在列表上长得一模一样，等于告诉用户"零评论"
+function neCommentCount(id) {
   const k = String(id || '');
-  if (!k) return 0;
-  if (neCommentCache.has(k)) return neCommentCache.get(k);
-  neCommentCache.set(k, 0); // 先占位，防并发重复打同一个接口
-  let c = 0;
-  try {
-    c = (await netease.commentCount(k)) || 0;
-  } catch (e) {
-    c = 0;
+  if (!k) return Promise.resolve({ c: 0, ok: false });
+  if (!neCommentCache.has(k)) {
+    // 缓存 Promise 而不是结果值：并发调用共享同一次请求，也不会互相看到占位 0
+    neCommentCache.set(
+      k,
+      netease
+        .commentCount(k)
+        .then((v) => ({ c: Number(v) || 0, ok: true }))
+        .catch(() => ({ c: 0, ok: false }))
+    );
   }
-  neCommentCache.set(k, c);
-  return c;
+  return neCommentCache.get(k);
 }
 
 // QQ + 网易云 评论数求和：comments 存合计用于排序，commentsDetail 存拆分供界面提示
@@ -1027,11 +948,19 @@ function applyCommentSum(sender, r) {
   const ne = r.neComments || 0;
   const qq = r.qqComments || 0;
   const sum = ne + qq;
-  r.commentsDetail = { netease: ne, qq: qq };
-  if (!sum) return;
+  // 「确实 0 条」和「接口没查到」必须分开：
+  // 老代码 `if (!sum) return;` 让 comments 停在 undefined，两种情况在界面上一模一样（空白）
+  const known = !!r.neCommentsOk || !!r.qqCommentsOk;
+  r.commentsDetail = { netease: ne, qq: qq, known: known };
   r.comments = sum;
+  r.commentsKnown = known;
   if (sender && !sender.isDestroyed()) {
-    sender.send('meta:update', { key: r.key, comments: sum, commentsDetail: r.commentsDetail });
+    sender.send('meta:update', {
+      key: r.key,
+      comments: sum,
+      commentsKnown: known,
+      commentsDetail: r.commentsDetail,
+    });
   }
 }
 
@@ -1073,7 +1002,9 @@ async function enrichMeta(sender, list) {
       .map((s) => Number(qqMap[String(s.songid || '')]) || 0);
     if (cs.length) {
       const max = Math.max.apply(null, cs);
-      if (max > 0) r.qqComments = max;
+      r.qqComments = max;
+      // 批量接口整批失败时 qqMap 是空的，这种情况算"没查到"，不算"零评论"
+      r.qqCommentsOk = Object.keys(qqMap).length > 0;
     }
   });
 
@@ -1087,26 +1018,19 @@ async function enrichMeta(sender, list) {
     if (neIds.length) {
       push(async () => {
         let neMax = 0;
+        let neOk = false;
         for (const id of neIds) {
-          const c = await neCommentCount(id);
-          if (c > neMax) neMax = c;
+          const got = await neCommentCount(id);
+          if (got.ok) neOk = true;
+          if (got.c > neMax) neMax = got.c;
         }
-        if (neMax > 0) r.neComments = neMax;
+        r.neComments = neMax;
+        r.neCommentsOk = neOk;
         applyCommentSum(sender, r);
       });
     } else {
       // 没有网易云源的条目（QQ/酷我独有）：只算 QQ 真实评论数，不对缺失平台猜数
       applyCommentSum(sender, r);
-    }
-    const kw = (r.sources || []).find((s) => s.platform === 'kuwo');
-    if (kw) {
-      push(async () => {
-        const sc = await kuwo.musicInfo(kw.id);
-        if (!sc) return;
-        r.hotDetail = r.hotDetail || {};
-        r.hotDetail.kuwo = sc;
-        if (!sender.isDestroyed()) sender.send('meta:update', { key: r.key, hotDetail: r.hotDetail });
-      });
     }
   });
   await pool(tasks, 8);
@@ -1653,6 +1577,14 @@ function createWindow() {
     },
   });
   mainWindow.loadFile(path.join(__dirname, 'renderer', 'index.html'));
+  // 页面 <title> 不再由渲染层决定：窗口标题改由主进程按「歌名 - 歌手」实时写，
+  // 否则页面一加载就把标题抢回 BBMusic，任务栏又只剩软件名
+  mainWindow.on('page-title-updated', (e) => {
+    e.preventDefault();
+    try {
+      mainWindow.setTitle(windowTitleText());
+    } catch (err) {}
+  });
 
   // 关闭行为：默认收进托盘继续放歌，用户也可以在设置里改成直接退出
   mainWindow.on('close', (e) => {
@@ -2256,10 +2188,53 @@ function trayIconPath() {
   return fs.existsSync(png) ? png : ico;
 }
 
+/* ---------------- 当前播放曲目（任务栏标题 / 托盘提示） ---------------- */
+// 渲染层每次切歌、播放、暂停都会推一次，主进程统一维护，避免各处口径不一致
+const nowPlayingInfo = { name: '', artist: '', playing: false };
+let trayMenuTimer = null;
+
+function windowTitleText() {
+  const n = nowPlayingInfo.name || '';
+  const a = nowPlayingInfo.artist || '';
+  if (!n) return 'BBMusic';
+  return a ? n + ' - ' + a : n;
+}
+
+function applyNowPlaying(info) {
+  const src = info || {};
+  nowPlayingInfo.name = String(src.name || '').slice(0, 120);
+  nowPlayingInfo.artist = String(src.artist || '').slice(0, 120);
+  nowPlayingInfo.playing = !!src.playing;
+  const title = windowTitleText();
+  try {
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.setTitle(title);
+  } catch (e) {}
+  try {
+    if (tray) tray.setToolTip(title === 'BBMusic' ? 'BBMusic' : 'BBMusic · ' + title);
+  } catch (e) {}
+  // 托盘右键菜单里的「正在播放」那行跟着刷新；播放/暂停连点时节流重建，别把菜单刷爆
+  if (!trayMenuTimer) {
+    trayMenuTimer = setTimeout(() => {
+      trayMenuTimer = null;
+      try {
+        if (tray) tray.setContextMenu(buildTrayMenu());
+      } catch (e) {}
+    }, 400);
+  }
+}
+
 function buildTrayMenu() {
   const on = lyricVisible();
   const curFont = normLyricFont(cfg.lyricFont);
   return Menu.buildFromTemplate([
+    {
+      // 首行常驻显示当前曲目，托盘右键一眼能看到在放什么
+      label: nowPlayingInfo.name
+        ? nowPlayingInfo.name + (nowPlayingInfo.artist ? ' - ' + nowPlayingInfo.artist : '')
+        : '未在播放',
+      enabled: false,
+    },
+    { type: 'separator' },
     {
       label: '显示主窗口',
       click: () => {
@@ -2390,10 +2365,10 @@ app.whenReady().then(() => {
     // 按评论总数排序必须先补全评论数再重排，否则整列都是空值根本排不出意义
     if (mode === 'comments') {
       await enrichMeta(e.sender, res.list);
-      sortResultList(res.list, keyword, 'comments');
+      sortResultList(res.list, keyword, mode);
       return res;
     }
-    // 其他排序不阻塞返回，热度/评论数补到了再推给界面
+    // 其他排序不阻塞返回，评论数补到了再推给界面
     enrichMeta(e.sender, res.list.slice(0, 48));
     return res;
   });
@@ -2625,6 +2600,8 @@ app.whenReady().then(() => {
     version: app.getVersion(),
     author: '粑粑超人',
   }));
+  // 渲染层上报当前曲目：任务栏标题、托盘提示、系统媒体信息统一由主进程写
+  ipcMain.on('player:now', (e, info) => applyNowPlaying(info));
 
   createWindow();
   createTray();

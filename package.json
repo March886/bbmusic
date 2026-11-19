@@ -1,6 +1,6 @@
 {
   "name": "bbmusic",
-  "version": "0.4.0",
+  "version": "1.0.0",
   "description": "BBMusic - 多平台聚合音乐播放器",
   "author": "粑粑超人",
   "main": "main.js",
@@ -31,7 +31,9 @@
       "apis/**/*",
       "renderer/**/*",
       "icon.png",
-      "CHANGELOG.md"
+      "CHANGELOG.md",
+      "README.md",
+      "LICENSE"
     ],
     "asar": true,
     "publish": [

@@ -56,13 +56,16 @@ function fmtCount(n) {
 }
 
 // 评论数是 QQ 音乐 + 网易云 的合计，悬浮时把两边明细摊开
+// commentsKnown=false 表示这次没问出结果，跟"确实 0 条"必须分开说，否则等于骗用户
 function cmtTitle(it) {
   const d = it && it.commentsDetail;
-  if (!d) return '评论数（QQ音乐 + 网易云 合计）';
+  if (!d) return '评论数还在取…';
   const parts = [];
   if (d.netease) parts.push('网易云 ' + fmtCount(d.netease));
   if (d.qq) parts.push('QQ音乐 ' + fmtCount(d.qq));
-  if (!parts.length) return '两个平台均未取到评论数';
+  if (!parts.length) {
+    return it.commentsKnown ? '两个平台均无评论' : '未取到评论数（接口没返回，不等于零评论）';
+  }
   return '评论数合计 ' + fmtCount((d.netease || 0) + (d.qq || 0)) + '：' + parts.join(' + ');
 }
 
@@ -103,35 +106,15 @@ async function doSearch() {
 
 function rerenderSorted() {
   if (!state.results.length) return;
-  const mode = state.sortMode;
-  // 搜索词本身写了 live/伴奏等版本词时，不再对同名改编版本降权
-  const kwHasVer = /live|现场|演唱会|伴奏|纯音乐|翻唱|remix|混音|dj|版/i.test(state.lastKeyword || '');
+  const mode = state.sortMode === 'match' || state.sortMode === 'smart' ? state.sortMode : 'comments';
   state.results.forEach((it) => {
-    it.platCount = new Set(it.sources.map((s) => s.platform)).size;
-    if (mode === 'hot') it.score = it.hot;
-    else if (mode === 'match') it.score = it.match;
-    // 讨论度：只有网易云给得出评论总数，QQ/酷我拿不到（无公开接口）
-    // 有评论的按对数压到 1~2，没评论的按热度排 0~0.5，保证有数据的一定在前
-    else if (mode === 'comments') {
-      // 直接沿用主进程 sortResultList('comments') 的分数。
-      // 之前前端自己按「评论数 0.62 主权重」重算，等于把后端排好的顺序整个推翻：
-      // 周杰伦这类网易云没版权的正版只有 QQ/酷我有源，评论数恒为 0，永远被网易云翻唱挤到后面。
-      it.score = typeof it.bs === 'number' ? it.bs : (it.match || 0) * 0.34 + (it.hot || 0) * 0.18;
-    }
-    else it.score = it.match * 0.62 + it.hot * 0.38;
+    if (it.sources && it.sources.length) it.platCount = new Set(it.sources.map((s) => s.platform)).size;
   });
-  const kwLen = (state.lastKeyword || '').length;
-  state.results.sort((a, b) => {
-    if (Math.abs((b.score || 0) - (a.score || 0)) > 0.001) return b.score - a.score;
-    if (mode === 'comments' && (b.comments || 0) !== (a.comments || 0)) return (b.comments || 0) - (a.comments || 0);
-    if (!!a.artHit !== !!b.artHit) return a.artHit ? -1 : 1;
-    if (!!a.version !== !!b.version) return a.version ? 1 : -1;
-    const la = Math.abs(a.name.length - kwLen);
-    const lb = Math.abs(b.name.length - kwLen);
-    if (la !== lb) return la - lb;
-    if ((b.platCount || 1) !== (a.platCount || 1)) return (b.platCount || 1) - (a.platCount || 1);
-    return 0;
-  });
+  // 打分与排序全部交给主进程同一份 renderer/rank.js：
+  // 前端只要还留着自己的一套公式，用户切一次排序就会把后端排好的顺序整个推翻
+  //（老毛病：周杰伦这类只有 QQ/酷我有源的正版，评论数恒为 0，被网易云翻唱挤到十几名）
+  if (window.BBM_RANK) window.BBM_RANK.rankList(state.results, state.lastKeyword, mode);
+  else state.results.sort((a, b) => (b.score || 0) - (a.score || 0));
   renderList();
 }
 
@@ -158,12 +141,14 @@ function rowHtml(it, i) {
         '</span>'
     )
     .join('');
-  const hotVal = Math.round((it.hot || 0) * 100);
   const isPlaying = state.current && state.current.key === it.key;
   const inDef = inPlaylist(DEFAULT_PL_ID, it);
   const key = esc(it.key || '');
-  const coverHtml = it.cover
-    ? '<img class="row-cover" loading="lazy" src="' + esc(it.cover) + '" onerror="this.removeAttribute(\'src\')" />'
+  // 封面地址必须是 http(s) 的绝对地址，其它任何值（空串、"1"、0.66 这种打分残留）
+  // 一律当作没有封面处理，避免 img 拿相对路径去请求文件协议下的不存在的图
+  const cover = coverSrc(it.cover);
+  const coverHtml = cover
+    ? '<img class="row-cover" loading="lazy" decoding="async" src="' + esc(cover) + '" onerror="this.removeAttribute(\'src\')" />'
     : '<div class="row-cover"></div>';
   return (
     '<div class="song-row' + (isPlaying ? ' playing' : '') + '" data-idx="' + i + '" data-key="' + key + '">' +
@@ -179,9 +164,7 @@ function rowHtml(it, i) {
     '</div></div>' +
     '<span class="album-cell">' + esc(it.album) + '</span>' +
     '<span class="plat-tags">' + tags + '</span>' +
-    '<span class="hot-cell"><span class="hot-bar"><span class="hot-fill" style="width:' +
-    Math.min(100, hotVal) + '%"></span></span>' + hotVal + '</span>' +
-    '<span class="cmt-cell" title="' + esc(cmtTitle(it)) + '">' + (it.comments ? fmtCount(it.comments) : '—') + '</span>' +
+    '<span class="cmt-cell" title="' + esc(cmtTitle(it)) + '">' + (it.commentsKnown ? fmtCount(it.comments) : '—') + '</span>' +
     '<span class="time-cell">' + fmtTime(it.duration) + '</span>' +
     '<span class="act-cell"><button class="add-btn' + (inDef ? ' in' : '') + '" data-key="' + key +
     '" title="' + (inDef ? '已在默认歌单，点击换到别的歌单' : '添加到歌单') + '">+</button></span>' +
@@ -239,8 +222,10 @@ function orderSources(item) {
   });
 }
 
-async function playItem(item, queue) {
+async function playItem(item, queue, opts) {
   if (!item) return;
+  // silent=true：只装载音源并把进度定位到记忆点，不自动出声，等用户自己点播放
+  const silent = !!(opts && opts.silent);
   state.current = item;
   // 每点一次歌都重新允许跨平台补源一次（补到的源会写回歌单，下次直接用）
   item._altTried = false;
@@ -256,7 +241,7 @@ async function playItem(item, queue) {
   updateNowPlaying(item);
   // 刚切歌：audio 里还挂着上一首（甚至是上一首的坏源）的 duration，条上先按列表标注时长显示
   syncBarTime(true);
-  await tryPlayFrom(0, null, state.playSeq);
+  await tryPlayFrom(0, null, state.playSeq, silent);
   // 切歌后立刻把续播快照改成新歌（进度 0），避免下次启动续上上一首的中断点
   saveResumeNow();
 }
@@ -335,9 +320,10 @@ function unloadAudio() {
   syncBarTime(true);
 }
 
-async function tryPlayFrom(index, fails, seq) {
+async function tryPlayFrom(index, fails, seq, silent) {
   const item = state.current;
   if (!item) return;
+  const quiet = !!silent;
   const mySeq = seq || state.playSeq || 0;
   if (mySeq !== state.playSeq) return;
   const order = orderSources(item);
@@ -398,7 +384,7 @@ async function tryPlayFrom(index, fails, seq) {
               (alt.sources.some((s) => s.platform === 'bili') ? '（B站投稿音频，已下载到本地缓存）' : '')
           );
           // order 是补源前的列表，长度恰好是新源（排在末尾）的起点
-          return tryPlayFrom(order.length, errs, mySeq);
+          return tryPlayFrom(order.length, errs, mySeq, quiet);
         }
       }
       const why = (alt && alt.reason) || '其他平台和 B站 也没有可播版本';
@@ -426,12 +412,12 @@ async function tryPlayFrom(index, fails, seq) {
   // 已经被真实时长戳穿的坏源，别再浪费一次取链和下载
   if (state.badSrc[srcKeyOf(src)]) {
     errs.push({ platform: src.platform, reason: '音源内容与歌曲不符（已跳过）' });
-    return tryPlayFrom(index + 1, errs, mySeq);
+    return tryPlayFrom(index + 1, errs, mySeq, quiet);
   }
   // 替代源（跨平台补的）先卡一道时长：与原曲相差超过 4% 的直接不要，宁可没得播也不播错版本
   if (src.alt && item.duration && src.duration && Math.abs(src.duration - item.duration) > Math.max(4000, item.duration * 0.04)) {
     errs.push({ platform: src.platform, reason: '时长与原曲不符（可能是翻唱/剪辑版），已跳过' });
-    return tryPlayFrom(index + 1, errs, mySeq);
+    return tryPlayFrom(index + 1, errs, mySeq, quiet);
   }
   state.srcIndex = index;
   console.log('[try] idx=' + index + ' plat=' + src.platform + ' id=' + src.id + ' srcDur=' + (src.duration || 0) + ' itemDur=' + (item.duration || 0));
@@ -445,7 +431,7 @@ async function tryPlayFrom(index, fails, seq) {
   if (!r || !r.url) {
     errs.push({ platform: src.platform, reason: (r && r.reason) || '接口没有返回地址' });
     console.log('[switch] no-url', src.platform, src.id, (r && r.reason) || '');
-    return tryPlayFrom(index + 1, errs, mySeq);
+    return tryPlayFrom(index + 1, errs, mySeq, quiet);
   }
   audio.src = r.url;
   // 已切到新源，旧文件不再被独占，这时候才删得掉排在队列里的坏缓存
@@ -461,6 +447,17 @@ async function tryPlayFrom(index, fails, seq) {
   // 装载前先把条复位到列表时长，新源的真实时长要等校验通过才敢显示
   syncBarTime(true);
   audio.volume = clamp01(state.volume);
+  // 静默装载（启动续播专用）：只把音源装进 audio，进度交给 loadedmetadata 里的 restorePos 定位，
+  // 不出声、不把状态标成「正在播放」，等用户自己点播放键
+  if (quiet) {
+    try {
+      audio.preload = 'auto';
+      audio.load();
+    } catch (e) {}
+    setPlaying(false);
+    syncBarTime(true);
+    return;
+  }
   const p = audio.play();
   if (p && p.catch) {
     p.catch((e) => {
@@ -470,7 +467,7 @@ async function tryPlayFrom(index, fails, seq) {
         return;
       }
       console.log('[switch] play-reject', src.platform, e && e.name, e && e.message);
-      if (mySeq === state.playSeq) tryPlayFrom(index + 1, null, mySeq);
+      if (mySeq === state.playSeq) tryPlayFrom(index + 1, null, mySeq, quiet);
     });
   }
 }
@@ -542,18 +539,54 @@ function updateNowPlaying(item) {
     .join('');
   setCover($('npCover'), item.cover);
   loadLyric(item);
+  pushNowPlaying();
+}
+
+// 把当前曲目推给主进程：任务栏标题 / 托盘提示实时显示「歌名 - 歌手」，跟 QQ 音乐一个观感
+function pushNowPlaying() {
+  try {
+    if (!window.baba || !window.baba.nowPlaying) return;
+    const it = state.current;
+    window.baba.nowPlaying({
+      name: it ? it.name || '' : '',
+      artist: it ? it.artists || '' : '',
+      album: it ? it.album || '' : '',
+      playing: !!(state.playing && !audio.paused),
+    });
+    // Windows 系统媒体控制（音量弹窗 / Win+G）也带上歌名歌手
+    if (it && typeof MediaMetadata !== 'undefined' && navigator.mediaSession) {
+      try {
+        navigator.mediaSession.metadata = new MediaMetadata({
+          title: it.name || '',
+          artist: it.artists || '',
+          album: it.album || '',
+          artwork: it.cover ? [{ src: it.cover, sizes: '300x300' }] : [],
+        });
+      } catch (e) {}
+    }
+  } catch (e) {}
+}
+
+// 判断一个值是不是可用的封面地址：只认 http/https 绝对地址。
+// 历史 bug：搜索结果打分把覆盖率写进了 cover 字段，封面会变成 "1" / "0.667" 这种数字，
+// 这里统一兜住，非法的按无封面处理，走 CSS 里的音符占位。
+function coverSrc(v) {
+  if (!v) return '';
+  const s = String(v).trim();
+  return /^https?:\/\/[^\s]+$/i.test(s) ? s : '';
 }
 
 // 封面为空时移除 src（避免 img 拿页面自身 URL 去请求，出现破图），
 // 并退回 CSS 里的音符占位底图，未播放状态下也不会露出一块坏掉的贴图
 function setCover(imgEl, url) {
   if (!imgEl) return;
-  if (url) {
+  const src = coverSrc(url);
+  if (src) {
     imgEl.onerror = () => {
       imgEl.removeAttribute('src');
       imgEl.style.visibility = 'visible';
     };
-    imgEl.src = url;
+    imgEl.src = src;
     imgEl.style.visibility = 'visible';
   } else {
     imgEl.removeAttribute('src');
@@ -811,7 +844,9 @@ document.addEventListener('keydown', (e) => {
 });
 
 $('sortSelect').addEventListener('change', () => {
-  state.sortMode = $('sortSelect').value;
+  const v = $('sortSelect').value;
+  // 热度排序已取消，老配置/老页面残留的 hot 一律按评论总数处理
+  state.sortMode = v || 'comments';
   window.baba.saveSettings({ sortMode: state.sortMode });
   rerenderSorted();
 });
@@ -1035,18 +1070,16 @@ if ($('releasePageBtn')) {
 
 refreshUpdateState();
 
-// 搜索先返回列表，热度/评论数是后端随后补的，补到一条更新一条
+// 搜索先返回列表，评论数是后端随后补的，补到一条更新一条
 if (window.baba && window.baba.onMeta) {
   window.baba.onMeta((p) => {
     if (!p) return;
     const it = state.results.find((x) => x.key === p.key);
     if (!it) return;
     if (typeof p.comments === 'number') it.comments = p.comments;
+    // known 必须一起同步：只给 comments 不带标记，界面分不清「真 0 条」和「没查到」，评论列会一直显示 —
+    if (typeof p.commentsKnown === 'boolean') it.commentsKnown = p.commentsKnown;
     if (p.commentsDetail) it.commentsDetail = p.commentsDetail;
-    if (p.hotDetail && p.hotDetail.kuwo) {
-      it.hotDetail = Object.assign({}, it.hotDetail, p.hotDetail);
-      it.hot = Math.max(it.hot || 0, Math.min(1, p.hotDetail.kuwo / 100));
-    }
     rerenderSorted();
   });
 }
@@ -1075,6 +1108,8 @@ function setPlaying(v) {
   if (cover) cover.classList.toggle('spin', !!v);
   // 逐字效果靠帧循环推进，暂停后停掉省电
   if (v) startKaraoke();
+  // 播放/暂停都要同步一次任务栏标题与系统媒体信息
+  pushNowPlaying();
 }
 
 let lyricLines = [];
@@ -1425,7 +1460,11 @@ async function refreshStatus() {
   state.logged = { netease: ne, qq: qq };
   if (s.sortMode) state.sortMode = s.sortMode;
   if (s.preferPlatform) state.prefer = s.preferPlatform;
-  if ($('sortSelect') && s.sortMode) $('sortSelect').value = s.sortMode;
+  const sortSel = $('sortSelect');
+  if (sortSel && s.sortMode && Array.prototype.some.call(sortSel.options, (o) => o.value === s.sortMode)) {
+    sortSel.value = s.sortMode;
+    state.sortMode = s.sortMode;
+  }
   if ($('preferSelect') && s.preferPlatform) $('preferSelect').value = s.preferPlatform;
   // 关闭行为也要回填，否则下拉框启动后总停在下拉第一项，和实际配置对不上
   if ($('closeActionSelect')) $('closeActionSelect').value = s.closeAction || 'tray';
@@ -1703,7 +1742,7 @@ function songKey(it) {
   return s ? String(s.platform) + ':' + String(s.id) : String(it.name || '') + '|' + String(it.artists || '');
 }
 
-// 只保留「能直接起播」的字段：热度/评论/匹配度都是搜索期临时数据，写进配置会把文件撑大
+// 只保留「能直接起播」的字段：评论/匹配度等搜索期临时数据写进配置会把文件撑大
 function clientSong(it) {
   if (!it) return null;
   const sources = (it.sources || [])
@@ -2718,10 +2757,9 @@ audio.addEventListener('loadedmetadata', () => {
   try {
     audio.currentTime = d > 1.5 ? Math.min(p, d - 1) : p;
   } catch (e) {}
-  if (state.restoreAutoplay) {
-    state.restoreAutoplay = false;
-    Promise.resolve(audio.play()).catch(() => {});
-  }
+  // 只定位、绝不起播：定位完就停在记忆点，等用户自己点播放键
+  state.restoreAutoplay = false;
+  syncBarTime(false);
 });
 
 async function restoreResume() {
@@ -2759,20 +2797,22 @@ async function restoreResume() {
   }
   if (r.mode) setPlayMode(r.mode, false);
   state.restorePos = Math.max(0, Number(r.pos) || 0);
-  state.restoreAutoplay = !!r.playing;
+  // 启动一律不自动播放：只把歌名、封面、进度条摆在记忆点，等用户自己点播放
+  state.restoreAutoplay = false;
   try {
-    await playItem(song, queue && queue.length ? queue : [song]);
+    // silent：装载音源 + 定位进度，但不出声
+    await playItem(song, queue && queue.length ? queue : [song], { silent: true });
   } catch (e) {
     return;
   }
   if (state.restorePos > 0) {
     toast(
-      '已接着上次停下继续：' + (song.name || '未知歌曲') + ' ' + fmtTime(state.restorePos * 1000) +
-        (plName ? '（歌单「' + plName + '」）' : ''),
+      '已恢复到上次进度：' + (song.name || '未知歌曲') + ' ' + fmtTime(state.restorePos * 1000) +
+        (plName ? '（歌单「' + plName + '」）' : '') + '，点播放键继续',
       4200
     );
   } else if (plName) {
-    toast('已恢复到歌单「' + plName + '」，播完这首按当前模式往下放', 3600);
+    toast('已恢复到歌单「' + plName + '」，点播放键开始', 3600);
   }
 }
 
