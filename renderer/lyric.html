@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'" />
+    <title>BBMusic 桌面歌词</title>
+    <link rel="stylesheet" href="lyric.css" />
+  </head>
+  <body class="unlocked">
+    <!-- 两行歌词：上一行是当前句（高亮+逐字），下一行是待播句（淡） -->
+    <div id="stage" class="fx-fade">
+      <div id="lineCur" class="dl-line dl-cur"></div>
+      <div id="lineNext" class="dl-line dl-next"></div>
+      <div id="hint" class="dl-hint">BBMusic · 拖动可移动，双击锁定</div>
+    </div>
+
+    <div id="ops" class="dl-ops">
+      <button class="dl-btn" data-act="prev" title="上一首">
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M6 5h2v14H6zM19 5v14L9 12z" fill="currentColor" />
+        </svg>
+      </button>
+      <button class="dl-btn dl-play" data-act="play" title="播放 / 暂停">
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M8 5v14l11-7z" fill="currentColor" />
+        </svg>
+      </button>
+      <button class="dl-btn" data-act="next" title="下一首">
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M16 5h2v14h-2zM5 5v14l10-7z" fill="currentColor" />
+        </svg>
+      </button>
+      <button class="dl-btn" data-act="lock" title="锁定（鼠标穿透）">
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path
+            d="M12 2a5 5 0 0 0-5 5v3H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8a2 2 0 0 0-2-2h-1V7a5 5 0 0 0-5-5zm3 8H9V7a3 3 0 0 1 6 0z"
+            fill="currentColor"
+          />
+        </svg>
+      </button>
+      <button class="dl-btn dl-close" data-act="close" title="关闭桌面歌词">
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" />
+        </svg>
+      </button>
+    </div>
+
+    <script src="lyric.js"></script>
+  </body>
+</html>

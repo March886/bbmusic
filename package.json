@@ -1,0 +1,61 @@
+{
+  "name": "bbmusic",
+  "version": "0.3.1",
+  "description": "BBMusic - 多平台聚合音乐播放器",
+  "author": "粑粑超人",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder --win --x64",
+    "dist:dir": "electron-builder --win --x64 --dir"
+  },
+  "devDependencies": {
+    "electron": "33.4.11",
+    "electron-builder": "^26.0.12"
+  },
+  "build": {
+    "appId": "com.babachaoren.bbmusic",
+    "productName": "BBMusic",
+    "copyright": "Copyright © 2026 粑粑超人",
+    "electronDist": "runtime",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "package.json",
+      "apis/**/*",
+      "renderer/**/*",
+      "icon.png",
+      "CHANGELOG.md"
+    ],
+    "asar": true,
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "icon.ico",
+      "artifactName": "BBMusic-${version}-win-x64-setup.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowElevation": true,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "BBMusic",
+      "uninstallDisplayName": "BBMusic ${version}",
+      "deleteAppDataOnUninstall": false,
+      "installerIcon": "icon.ico",
+      "uninstallerIcon": "icon.ico",
+      "artifactName": "BBMusic-${version}-win-x64-setup.${ext}"
+    }
+  }
+}

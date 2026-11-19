@@ -1,0 +1,439 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' https: http: data:; media-src *; style-src 'self' 'unsafe-inline'; script-src 'self'" />
+  <title>BBMusic</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="app">
+    <!-- 侧边栏 -->
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="logo">B</div>
+        <div class="brand-text">
+          <strong>BBMusic</strong>
+          <span>by 粑粑超人</span>
+        </div>
+      </div>
+      <nav>
+        <button class="nav-item active" data-view="search">
+          <span class="ico"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.6" cy="10.6" r="6.6" /><path d="M15.5 15.5 20.2 20.2" /></svg></span> 搜索
+        </button>
+        <button class="nav-item" data-view="playlists">
+          <span class="ico"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3.4 6.2h11.4" /><path d="M3.4 12h8.2" /><path d="M3.4 17.8h6" /><circle cx="17.2" cy="17.4" r="3.1" /><path d="M20.3 17.4V7.6l-2.5.7" /></svg></span> 我的歌单
+        </button>
+        <button class="nav-item" data-view="history">
+          <span class="ico"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 12a8.5 8.5 0 1 0 2.6-6.1" /><path d="M3.1 4.3v4.4h4.4" /><path d="M12 7.8v4.6l3.2 1.9" /></svg></span> 播放历史
+        </button>
+        <button class="nav-item" data-view="playing">
+          <span class="ico"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="8.4" cy="17.2" r="3" /><path d="M11.4 17.2V4.6l8.2-1.5v10.4" /><circle cx="16.5" cy="16.4" r="3" /></svg></span> 正在播放
+        </button>
+        <button class="nav-item" data-view="settings">
+          <span class="ico"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3.3" /><path d="M12 2.6v2.5M12 18.9v2.5M4 12H1.6M22.4 12H20M6.1 6.1 4.4 4.4M19.6 19.6l-1.7-1.7M17.9 6.1l1.7-1.7M4.4 19.6l1.7-1.7" /></svg></span> 账号与设置
+        </button>
+      </nav>
+      <div class="sidebar-foot">
+        <div class="status-title">平台状态</div>
+        <div class="plat-status" id="platStatus"></div>
+      </div>
+    </aside>
+
+    <!-- 主区域 -->
+    <main class="main">
+      <header class="topbar">
+        <div class="tb-brand">
+          <span class="tb-logo">B</span>
+          <div class="tb-txt">
+            <strong>BBMusic</strong>
+            <em>网易云 · QQ音乐 · 酷我</em>
+          </div>
+        </div>
+        <div class="search-wrap">
+          <span class="search-ico"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.6" cy="10.6" r="6.4" /><path d="M15.4 15.4 20.4 20.4" /></svg></span>
+          <input id="searchInput" type="text" placeholder="搜索歌曲、歌手，三平台同时检索" spellcheck="false" />
+          <button id="searchBtn" class="btn-search">搜索</button>
+        </div>
+        <div class="sort-wrap">
+          <label>排序</label>
+          <select id="sortSelect">
+            <option value="comments">按评论总数</option>
+            <option value="hot">按热度</option>
+            <option value="match">按相关度</option>
+            <option value="smart">综合推荐</option>
+          </select>
+        </div>
+      </header>
+
+      <!-- 搜索视图 -->
+      <section class="view" id="view-search">
+        <div class="view-head">
+          <h2 id="resultTitle">搜点什么吧</h2>
+          <span class="hint" id="resultMeta"></span>
+        </div>
+        <div class="list-head">
+          <span class="col-idx">#</span>
+          <span class="col-title">标题</span>
+          <span class="col-album">专辑</span>
+          <span class="col-plat">来源</span>
+          <span class="col-hot">热度</span>
+          <span class="col-cmt">评论</span>
+          <span class="col-time">时长</span>
+          <span class="col-act" title="右键歌曲也可以添加到歌单">+</span>
+        </div>
+        <div class="song-list" id="songList">
+          <div class="empty">在搜索框输入关键词，BBMusic 会同时检索网易云、QQ 音乐与酷我</div>
+        </div>
+      </section>
+
+      <!-- 我的歌单（一级：歌单列表；二级：歌单详情） -->
+      <section class="view hidden" id="view-playlists">
+        <div id="plIndex">
+          <div class="view-head">
+            <h2>我的歌单</h2>
+            <span class="hint">点歌单进入详情；播放栏的爱心收藏会直接进「默认歌单」</span>
+            <div class="head-tools">
+              <button id="plNewBtn" class="btn-primary">+ 新建歌单</button>
+              <button id="plImportBtn" class="btn-ghost">导入分享链接</button>
+            </div>
+          </div>
+          <div class="pl-grid" id="plGrid"></div>
+        </div>
+        <div id="plDetail" class="hidden">
+          <div class="view-head">
+            <button id="plBackBtn" class="btn-ghost">&#8592; 返回歌单</button>
+            <h2 id="plTitle">歌单</h2>
+            <span class="hint" id="plMeta"></span>
+            <div class="head-tools">
+              <button id="plPlayAllBtn" class="btn-primary">播放全部</button>
+              <button id="plRenameBtn" class="btn-ghost">重命名</button>
+              <button id="plDelBtn" class="btn-ghost danger">删除歌单</button>
+            </div>
+          </div>
+          <div class="list-search">
+            <span class="search-ico"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.6" cy="10.6" r="6.4" /><path d="M15.4 15.4 20.4 20.4" /></svg></span>
+            <input id="plSearchInput" type="text" placeholder="只在本歌单里搜索已有歌曲（与顶部搜索无关）" spellcheck="false" />
+            <button id="plSearchClear" class="btn-ghost">清空</button>
+          </div>
+          <div class="list-head">
+            <span class="col-idx">#</span>
+            <span class="col-title">标题</span>
+            <span class="col-album">专辑</span>
+            <span class="col-plat">来源</span>
+            <span class="col-hot">热度</span>
+            <span class="col-cmt">评论</span>
+            <span class="col-time">时长</span>
+            <span class="col-act">+</span>
+          </div>
+          <div class="song-list" id="plSongList"></div>
+        </div>
+      </section>
+
+      <!-- 播放历史 -->
+      <section class="view hidden" id="view-history">
+        <div class="view-head">
+          <h2>播放历史</h2>
+          <span class="hint" id="hisMeta">最近播放的 100 首歌曲，新的在前</span>
+          <div class="head-tools">
+            <button id="hisClearBtn" class="btn-ghost danger">清空历史</button>
+          </div>
+        </div>
+        <div class="list-search">
+          <span class="search-ico"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.6" cy="10.6" r="6.4" /><path d="M15.4 15.4 20.4 20.4" /></svg></span>
+          <input id="hisSearchInput" type="text" placeholder="只在播放历史里搜索（与顶部搜索无关）" spellcheck="false" />
+          <button id="hisSearchClear" class="btn-ghost">清空</button>
+        </div>
+        <div class="list-head">
+          <span class="col-idx">#</span>
+          <span class="col-title">标题</span>
+          <span class="col-album">专辑</span>
+          <span class="col-plat">来源</span>
+          <span class="col-hot">热度</span>
+          <span class="col-cmt">评论</span>
+          <span class="col-time">时长</span>
+          <span class="col-act">+</span>
+        </div>
+        <div class="song-list" id="hisList"></div>
+        <div class="list-more hidden" id="hisMoreWrap">
+          <button id="hisMoreBtn" class="btn-ghost">加载更多</button>
+        </div>
+      </section>
+
+      <!-- 正在播放视图 -->
+      <section class="view hidden" id="view-playing">
+        <div class="np-wrap">
+          <div class="np-card">
+            <div class="np-disc">
+              <img id="npCover" class="np-cover" alt="" />
+            </div>
+            <div class="np-info">
+              <h2 id="npName">未在播放</h2>
+              <p id="npArtist">在搜索页点一首歌，这里会显示封面与滚动歌词</p>
+              <p id="npAlbum" class="np-album"></p>
+              <div class="np-plat" id="npPlat"></div>
+            </div>
+          </div>
+          <div class="lyric-card">
+            <div class="lyric-head">
+              <span>歌词</span>
+              <i id="lyricFrom">滚动歌词</i>
+              <div class="lh-right">
+                <label class="lh-label" for="lyricFxSelect">效果</label>
+                <select id="lyricFxSelect" title="歌词滚动效果">
+                  <option value="fade">淡入</option>
+                  <option value="plain">平淡</option>
+                  <option value="fly">飞入</option>
+                  <option value="rise">上浮</option>
+                  <option value="zoom">弹跳</option>
+                  <option value="blur">聚焦</option>
+                  <option value="karaoke">逐字</option>
+                </select>
+                <label class="lh-label" for="lyricColorQuick">颜色</label>
+                <select id="lyricColorQuick" title="歌词颜色">
+                  <option value="orange">活力橙</option>
+                  <option value="pink">樱花粉</option>
+                  <option value="blue">天青蓝</option>
+                  <option value="green">抹茶绿</option>
+                  <option value="purple">星河紫</option>
+                  <option value="white">珍珠白</option>
+                  <option value="rainbow">彩虹渐变</option>
+                </select>
+                <label class="lh-label" for="dlFontSelect">字号</label>
+                <select id="dlFontSelect" title="桌面歌词字号">
+                  <option value="26">小</option>
+                  <option value="34">标准</option>
+                  <option value="42">大</option>
+                  <option value="52">特大</option>
+                </select>
+              </div>
+            </div>
+            <div class="lyric-box" id="lyricBox">
+              <div class="lyric-empty">播放后歌词会自动滚动高亮</div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 设置视图 -->
+      <section class="view hidden" id="view-settings">
+        <h2>账号与设置</h2>
+        <div class="card">
+          <div class="card-row">
+            <div class="card-main">
+              <strong><span class="pdot netease"></span>网易云音乐</strong>
+              <p class="muted" id="neStatus">未登录</p>
+            </div>
+            <div class="card-actions">
+              <button class="btn-primary" data-login="netease">扫码登录</button>
+              <button class="btn-ghost" data-logout="netease">退出</button>
+            </div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-row">
+            <div class="card-main">
+              <strong><span class="pdot qq"></span>QQ 音乐</strong>
+              <p class="muted" id="qqStatus">未登录</p>
+            </div>
+            <div class="card-actions">
+              <button class="btn-primary" data-login="qq">扫码登录</button>
+              <button class="btn-ghost" data-logout="qq">退出</button>
+            </div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-row">
+            <div class="card-main">
+              <strong><span class="pdot kuwo"></span>酷我音乐</strong>
+              <p class="muted" id="kuwoStatus">免登录直连，可直接搜索与播放（不支持账号登录）</p>
+            </div>
+            <div class="card-actions">
+              <span class="tag kuwo">已接入</span>
+            </div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-row">
+            <div class="card-main">
+              <strong>其它平台</strong>
+              <p class="muted">酷狗、咪咕、B 站等暂未接入；当前已覆盖网易云、QQ 音乐、酷我三平台取链</p>
+            </div>
+            <div class="card-actions">
+              <span class="tag ghost">规划中</span>
+            </div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-row">
+            <div class="card-main">
+              <strong>关闭窗口时</strong>
+              <p class="muted">默认最小化到托盘，音乐继续播放；选“退出程序”则点关闭按钮即完全退出</p>
+            </div>
+            <select id="closeActionSelect">
+              <option value="tray">最小化到托盘</option>
+              <option value="quit">退出程序</option>
+            </select>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-row">
+            <div class="card-main">
+              <strong>默认优先平台</strong>
+              <p class="muted">同一首歌多平台都有时，优先从该平台取流</p>
+            </div>
+            <select id="preferSelect">
+              <option value="netease">网易云音乐</option>
+              <option value="qq">QQ 音乐</option>
+              <option value="kuwo">酷我音乐</option>
+            </select>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-row">
+            <div class="card-main">
+              <strong>音质选择</strong>
+              <p class="muted" id="qualityHint">按各平台能提供的音质由低到高排列；未登录默认用酷我音质，登录后按所在平台的会员音质取流</p>
+            </div>
+            <select id="qualitySelect" title="播放音质">
+              <option value="auto">自动（跟随账号）</option>
+              <option value="128">标准 128kbps</option>
+              <option value="192">较高 192kbps</option>
+              <option value="320">高品质 320kbps</option>
+              <option value="flac">无损 FLAC</option>
+            </select>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-row">
+            <div class="card-main">
+              <strong>歌词颜色</strong>
+              <p class="muted" id="lyricColorHint">主窗口正在唱的那一句和桌面歌词都用这个颜色；彩虹渐变只对逐字效果生效</p>
+            </div>
+            <select id="lyricColorSelect" title="歌词颜色">
+              <option value="orange">活力橙</option>
+              <option value="pink">樱花粉</option>
+              <option value="blue">天青蓝</option>
+              <option value="green">抹茶绿</option>
+              <option value="purple">星河紫</option>
+              <option value="white">珍珠白</option>
+              <option value="rainbow">彩虹渐变</option>
+            </select>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-row">
+            <div class="card-main">
+              <strong>歌词延迟补偿</strong>
+              <p class="muted" id="lyricOffsetHint">逐字进度比演唱慢就往左拖（提前），快了往右拖（延后）；双击滑块回零</p>
+            </div>
+            <div class="offset-ctrl">
+              <input id="lyricOffsetRange" type="range" min="-1000" max="1000" step="20" value="0" title="负数=歌词提前，正数=歌词延后" />
+              <span class="offset-val" id="lyricOffsetVal">不补偿</span>
+            </div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-row">
+            <div class="card-main">
+              <strong>缓存设置</strong>
+              <p class="muted" id="cacheDirText">缓存位置：读取中…</p>
+              <p class="muted" id="cacheSizeText">已用缓存：读取中…</p>
+            </div>
+            <div class="card-actions">
+              <button id="cacheToggleBtn" class="btn-ghost" title="开启后播放过的音频会存到缓存目录，下次直接读本地">关闭缓存</button>
+              <button id="cachePickBtn" class="btn-ghost" title="选择缓存文件夹">更换位置</button>
+              <button id="cacheClearBtn" class="btn-ghost danger" title="删除缓存目录里已缓存的音频">清除缓存</button>
+            </div>
+          </div>
+        </div>
+        <p class="disclaimer">
+          本软件仅为个人本机学习使用，所有音频均来自各平台官方接口，版权归原平台与版权方所有。
+          请勿用于商业用途或公开分发，请勿将本软件安装包上传至任何公开渠道。
+          <br />热度说明：网易云取平台官方热度值；QQ 音乐与酷我接口不返回播放量，热度按站内排名与评分估算，仅供参考。
+        </p>
+      </section>
+    </main>
+  </div>
+
+  <!-- 播放条 -->
+  <footer class="player">
+    <div class="p-left">
+      <img id="barCover" class="bar-cover" alt="" />
+      <div class="bar-meta">
+        <span id="barName" class="bar-name">未在播放</span>
+        <span id="barArtist" class="bar-artist">—</span>
+      </div>
+    </div>
+    <div class="p-center">
+      <div class="controls">
+        <button id="modeBtn" class="ctrl mode" aria-label="播放模式：顺序播放" title="播放模式：顺序播放（点击切换）">
+          <span id="modeText" data-mode="order"><svg class="ico-svg mode-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h9"/><path d="M4 12h9"/><path d="M4 17h6"/><path d="M17.5 5.5v13"/><path d="M13.5 14.8l4 4 4-4"/></svg></span>
+        </button>
+        <button id="prevBtn" class="ctrl" aria-label="上一曲">
+          <svg class="ico-svg" viewBox="0 0 24 24" aria-hidden="true"><path d="M7.2 5.6a1.1 1.1 0 0 1 2.2 0v12.8a1.1 1.1 0 0 1-2.2 0V5.6zm11.9.32v11.36a1 1 0 0 1-1.53.85l-7.7-5.68a1 1 0 0 1 0-1.7l7.7-5.68a1 1 0 0 1 1.53.85z"/></svg>
+        </button>
+        <button id="playBtn" class="ctrl play" aria-label="播放">
+          <svg class="ico-svg" viewBox="0 0 24 24" aria-hidden="true"><path d="M8.4 5.15v13.7a1.05 1.05 0 0 0 1.6.9l10.95-6.85a1.05 1.05 0 0 0 0-1.8L10 4.25a1.05 1.05 0 0 0-1.6.9z"/></svg>
+        </button>
+        <button id="nextBtn" class="ctrl" aria-label="下一曲">
+          <svg class="ico-svg" viewBox="0 0 24 24" aria-hidden="true"><path d="M16.8 5.6a1.1 1.1 0 0 1 2.2 0v12.8a1.1 1.1 0 0 1-2.2 0V5.6zM4.9 5.92v11.36a1 1 0 0 0 1.53.85l7.7-5.68a1 1 0 0 0 0-1.7l-7.7-5.68a1 1 0 0 0-1.53.85z"/></svg>
+        </button>
+        <button id="favBtn" class="ctrl fav" aria-label="添加到默认歌单" title="左键：加入 / 移出默认歌单">
+          <svg class="ico-svg" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20.7l-1.4-1.3C5.7 15 3 12.6 3 9.6 3 7.1 5.1 5 7.6 5c1.5 0 2.9.7 3.8 1.9.9-1.2 2.3-1.9 3.8-1.9C17.6 5 19.7 7.1 19.7 9.6c0 3-2.7 5.4-7.3 9.8L12 20.7z"/></svg>
+        </button>
+        <button id="dlBtn" class="ctrl dl" aria-label="桌面歌词" title="开启 / 关闭桌面歌词（双击歌词可锁定穿透，托盘菜单或快捷键解锁）">
+          <svg class="ico-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2.6" y="3.6" width="18.8" height="12.4" rx="2.4"/><path d="M12 16v3.4"/><path d="M7.6 19.9h8.8"/><path d="M6.4 7.6h11.2"/><path d="M6.4 11h6.4"/></svg>
+        </button>
+      </div>
+      <div class="progress-row">
+        <span id="curTime">00:00</span>
+        <input id="progress" type="range" min="0" max="1000" value="0" />
+        <span id="durTime">00:00</span>
+      </div>
+    </div>
+    <div class="p-right">
+      <svg class="vol-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9.5h3.2L12 5.6v12.8L7.2 14.5H4a1 1 0 0 1-1-1v-3a1 1 0 0 1 1-1zm11.6-2.1a1 1 0 0 1 1.4.1 6.6 6.6 0 0 1 0 9 1 1 0 0 1-1.5-1.35 4.6 4.6 0 0 0 0-6.3 1 1 0 0 1 .1-1.45z"/></svg>
+      <input id="volume" type="range" min="0" max="100" value="80" />
+    </div>
+  </footer>
+
+  <!-- 添加到歌单：选择歌单弹层 -->
+  <div class="sheet-mask hidden" id="plPickMask">
+    <div class="sheet">
+      <div class="sheet-head">
+        <strong id="plPickTitle">添加到歌单</strong>
+        <button class="sheet-x" id="plPickClose" aria-label="关闭">&#215;</button>
+      </div>
+      <p class="sheet-sub" id="plPickSub"></p>
+      <div class="sheet-body" id="plPickList"></div>
+      <div class="sheet-foot">
+        <button class="btn-primary" id="plPickNew">+ 新建歌单并加入</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 通用输入弹窗：新建歌单 / 重命名 / 粘贴分享链接 -->
+  <div class="sheet-mask hidden" id="inputMask">
+    <div class="sheet">
+      <div class="sheet-head">
+        <strong id="inputTitle">新建歌单</strong>
+        <button class="sheet-x" id="inputClose" aria-label="关闭">&#215;</button>
+      </div>
+      <p class="sheet-sub" id="inputHint"></p>
+      <textarea id="inputBox" class="input-box" rows="1" spellcheck="false"></textarea>
+      <div class="sheet-foot">
+        <button class="btn-ghost" id="inputCancel">取消</button>
+        <button class="btn-primary" id="inputOk">确定</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 歌曲右键菜单 -->
+  <div class="ctx-menu hidden" id="ctxMenu"></div>
+
+  <div id="toast" class="toast hidden"></div>
+  <audio id="audio"></audio>
+  <script src="app.js"></script>
+</body>
+</html>

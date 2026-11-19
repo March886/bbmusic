@@ -1,0 +1,15 @@
+node_modules/
+dist/
+runtime/
+temp/
+electron-smoke/
+
+# 打包中间产物
+*.log
+npm-inst.log
+*.bak-*
+*.blockmap
+
+# 系统
+Thumbs.db
+.DS_Store
